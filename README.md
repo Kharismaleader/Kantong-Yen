@@ -16,7 +16,6 @@ Web app sederhana untuk mencatat **pemasukan & pengeluaran harian dalam Yen (¥)
 - **Sinkronisasi dua perangkat**: data tersimpan di Google Sheet yang sama (tab Transaksi) lewat Apps Script Web App (`Code.gs`), jadi HP suami & HP istri selalu melihat data yang sama. Setiap perangkat memasukkan **kode sinkron keluarga** satu kali (tombol "Kode sinkron"); kode disimpan hanya di perangkat, bukan di kode sumber.
 - Cadangan lokal tetap tersedia di perangkat (localStorage) untuk mode offline; perubahan terkirim otomatis saat aplikasi dibuka / tombol "Sinkronkan" diketuk.
 - Cadangan & pulihkan data lewat tombol "Salin cadangan" / "Pulihkan data"
-- Unduh CSV catatan baru untuk di-append manual ke Sheet bila diperlukan
 - Terhubung ke Google Sheet **"Kantong Yen - Data Keuangan"** untuk rekap & grafik:
   https://docs.google.com/spreadsheets/d/1TrhJybFjeljbyvRp-ak4ivnFhgbHBZHeAfZB2oAcsNI/edit
 
