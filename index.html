@@ -123,15 +123,15 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid var(-
   </section>
   <div id="txs"></div>
   <section class="panel" style="margin-top:22px">
-    <h2>Google Sheet</h2>
-    <p class="cnote" id="snote" style="margin-top:0">Sheet berisi tab Transaksi, ringkasan bulanan, dan grafik yang terhitung otomatis. Tarik data dari Sheet, atau unduh CSV untuk ditambahkan ke Sheet.</p>
+    <h2>Google Sheet &amp; Sinkronisasi</h2>
+    <p class="cnote" id="snote" style="margin-top:0">Data tersinkron otomatis ke Google Sheet yang sama, jadi HP kamu dan HP istri selalu melihat catatan yang sama. Ketuk Sinkronkan bila ingin memaksa sinkron sekarang.</p>
     <div class="srow">
       <a class="sbtn pri" href="https://docs.google.com/spreadsheets/d/1TrhJybFjeljbyvRp-ak4ivnFhgbHBZHeAfZB2oAcsNI/edit" target="_blank" rel="noopener">Buka Sheet</a>
-      <button class="sbtn" id="pull">Tarik dari Sheet</button>
+      <button class="sbtn" id="pull">Sinkronkan</button>
       <button class="sbtn" id="csv">Unduh CSV</button>
     </div>
   </section>
-  <div class="foot" style="margin-top:0"><button id="bk">Salin cadangan</button><button id="rs">Pulihkan data</button></div>
+  <div class="foot" style="margin-top:0"><button id="bk">Salin cadangan</button><button id="rs">Pulihkan data</button><button id="kkey">Kode sinkron</button></div>
 </main>
 
 <button class="fab" id="fab" aria-label="Tambah catatan">+</button>
@@ -248,13 +248,15 @@ $('save').onclick=function(){
   var a=+$('amt').value.replace(/\D/g,'');
   if(!a){$('err').textContent='Isi jumlah lebih dari ¥0.';return}
   var rec={type:type,amt:a,cat:cat,note:$('note').value.trim(),date:$('date').value||today()};
-  if(editId){tx=tx.map(function(y){return y.id===editId?Object.assign({id:editId},rec):y})}
-  else{rec.id=Date.now();tx.push(rec)}
+  var savedRec=null;
+  if(editId){tx=tx.map(function(y){if(y.id===editId){savedRec=Object.assign({},y,rec,{id:editId,_p:1});return savedRec}return y})}
+  else{rec.id=Date.now();rec._p=1;tx.push(rec);savedRec=rec}
   save();month=rec.date.slice(0,7);closeSheet();render();toast(editId?'Perubahan disimpan':'Catatan disimpan');
+  if(savedRec)pushOne(savedRec);
 };
 $('del').onclick=function(){
   if(!confirm('Hapus catatan ini?'))return;
-  tx=tx.filter(function(y){return y.id!==editId});save();closeSheet();render();toast('Catatan dihapus');
+  var delId=editId;tx=tx.filter(function(y){return y.id!==editId});queueDel(delId);save();closeSheet();render();toast('Catatan dihapus');pushDel(delId);
 };
 function shift(n){var p=month.split('-'),d=new Date(+p[0],+p[1]-1+n,1);month=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');render()}
 $('prev').onclick=function(){shift(-1)};$('next').onclick=function(){shift(1)};
@@ -268,73 +270,90 @@ $('rs').onclick=function(){
   if(!s)return;
   try{var a=JSON.parse(s);if(!Array.isArray(a))throw 0;tx=a;save();render();toast('Data dipulihkan')}catch(e){toast('Teks cadangan tidak valid')}
 };
-var SHEET_ID='1TrhJybFjeljbyvRp-ak4ivnFhgbHBZHeAfZB2oAcsNI';
-var MON={jan:1,feb:2,mar:3,apr:4,mei:5,may:5,jun:6,jul:7,agu:8,aug:8,agt:8,ags:8,sep:9,okt:10,oct:10,nov:11,des:12,dec:12};
+var SYNC_URL='https://script.google.com/macros/s/AKfycbyRpO1WLRcFU_J8sQY5i_1xeVK2AHw0rPc_sGjGhCgjtTxBc8-oB8wKG6yyr0G_kHNuZQ/exec';
+function syncKey(){try{return localStorage.getItem('kantong-yen-key')||''}catch(e){return ''}}
+function setKey(k){try{localStorage.setItem('kantong-yen-key',k)}catch(e){}}
 function snote(m){$('snote').textContent=m}
-function dfmt(y,m,d){return y+'-'+String(m).padStart(2,'0')+'-'+String(d).padStart(2,'0')}
-function pdate(s){
-  var m;s=String(s||'').trim();
-  if(m=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/))return dfmt(+m[1],+m[2],+m[3]);
-  if(m=s.match(/^(\d{1,2})\s+([A-Za-z]+)\.?\s+(\d{4})/)){var mo=MON[m[2].slice(0,3).toLowerCase()];return mo?dfmt(+m[3],mo,+m[1]):''}
-  return '';
+function askKey(){
+  var k=prompt('Masukkan kode sinkron keluarga (diberikan satu kali, berlaku untuk HP kamu dan HP istri):');
+  if(k){setKey(k.trim());return true}
+  return false;
 }
-function parseCSV(s){
-  var rows=[],row=[],f='',q=false;
-  for(var i=0;i<s.length;i++){
-    var c=s[i];
-    if(q){if(c==='"'){if(s[i+1]==='"'){f+='"';i++}else q=false}else f+=c}
-    else if(c==='"')q=true;
-    else if(c===','){row.push(f);f=''}
-    else if(c==='\n'||c==='\r'){if(c==='\r'&&s[i+1]==='\n')i++;row.push(f);f='';rows.push(row);row=[]}
-    else f+=c;
-  }
-  if(f!==''||row.length){row.push(f);rows.push(row)}
-  return rows;
+$('kkey').onclick=function(){
+  var k=prompt('Kode sinkron keluarga saat ini: '+(syncKey()||'(belum diisi)')+'\nIsi kode baru untuk mengganti, atau kosongkan untuk membatalkan:',syncKey());
+  if(k!==null&&k.trim()){setKey(k.trim());toast('Kode sinkron disimpan');syncNow()}
+};
+function delQueue(){try{return JSON.parse(localStorage.getItem('kantong-yen-del')||'[]')}catch(e){return[]}}
+function queueDel(id){try{var q=delQueue();if(q.indexOf(String(id))<0)q.push(String(id));localStorage.setItem('kantong-yen-del',JSON.stringify(q))}catch(e){}}
+function unqueueDel(id){try{localStorage.setItem('kantong-yen-del',JSON.stringify(delQueue().filter(function(x){return x!==String(id)})))}catch(e){}}
+async function apiGet(){
+  var r=await fetch(SYNC_URL+'?key='+encodeURIComponent(syncKey()));
+  return r.json();
 }
-function txkey(x){return [x.date,x.type,x.cat,x.note,x.amt].join('|')}
-async function pull(){
-  var mcp=null;try{mcp=await claude.use('mcp')}catch(e){}
-  if(!mcp){snote('Tarik dari Sheet hanya jalan saat halaman dibuka lewat claude.ai dengan konektor Google Drive aktif.');return}
-  snote('Mengambil data dari Sheet...');
+async function apiPost(body){
+  body.key=syncKey();
+  var r=await fetch(SYNC_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(body)});
+  return r.json();
+}
+function cleanRec(x){return {id:String(x.id),date:x.date,type:x.type,cat:x.cat,note:x.note||'',amt:x.amt}}
+async function pushOne(x){
+  if(!SYNC_URL||!syncKey())return;
+  try{var r=await apiPost({action:'upsert',tx:cleanRec(x)});if(r&&r.ok){x.s=1;delete x._p;save()}}catch(e){}
+}
+async function pushDel(id){
+  if(!SYNC_URL||!syncKey())return;
+  try{var r=await apiPost({action:'delete',id:String(id)});if(r&&r.ok)unqueueDel(id)}catch(e){}
+}
+var syncing=false;
+async function syncNow(manual){
+  if(!SYNC_URL){snote('Sinkronisasi belum dihubungkan. URL database belum terpasang di aplikasi ini.');return}
+  if(!syncKey()){if(manual&&askKey()){/* lanjut */}else{if(manual)snote('Kode sinkron belum diisi. Ketuk tombol Kode sinkron di bawah.');return}}
+  if(syncing)return; syncing=true;
+  if(manual)snote('Menyinkronkan...');
   try{
-    var r=await mcp.callTool('Google Drive','download_file_content',{fileId:SHEET_ID,exportMimeType:'text/csv'});
-    var p=r.payload;if(typeof p==='string'){try{p=JSON.parse(p)}catch(e){}}
-    var b=p&&p.content;if(!b)throw {code:'empty'};
-    var txt=new TextDecoder().decode(Uint8Array.from(atob(b),function(c){return c.charCodeAt(0)}));
-    var rows=parseCSV(txt).slice(1),have={},seen={},add=0,skip=0,n=0;
-    tx.forEach(function(x){var k=txkey(x);have[k]=(have[k]||0)+1});
-    rows.forEach(function(r){
-      if(r.every(function(c){return !String(c).trim()}))return;
-      var j=String(r[1]||'').trim().toLowerCase(),ty=j==='pemasukan'?'in':j==='pengeluaran'?'out':'',d=pdate(r[0]),a=Math.round(Math.abs(+String(r[4]||'').replace(/[^\d.]/g,'')));
-      if(!d||!ty||!a){skip++;return}
-      var x={id:Date.now()+(n++),type:ty,amt:a,cat:String(r[2]||'').trim()||'Lainnya',note:String(r[3]||'').trim(),date:d,s:1};
-      var k=txkey(x);seen[k]=(seen[k]||0)+1;
-      if(seen[k]>(have[k]||0)){tx.push(x);add++}
+    var dq=delQueue().slice();
+    for(var i=0;i<dq.length;i++){var rd=await apiPost({action:'delete',id:dq[i]});if(rd&&rd.ok)unqueueDel(dq[i])}
+    var pend=tx.filter(function(x){return x._p||!x.s});
+    for(var j=0;j<pend.length;j++){var rp=await apiPost({action:'upsert',tx:cleanRec(pend[j])});if(rp&&rp.ok){pend[j].s=1;delete pend[j]._p}}
+    var g=await apiGet();
+    if(!g||!g.ok)throw new Error('get');
+    var server=g.tx||[], sIds={}, byId={};
+    tx.forEach(function(x){byId[String(x.id)]=x});
+    server.forEach(function(s){
+      sIds[String(s.id)]=1;
+      var l=byId[String(s.id)];
+      if(!l)tx.push({id:s.id,date:s.date,type:s.type,cat:s.cat,note:s.note,amt:s.amt,s:1});
+      else if(!l._p){l.date=s.date;l.type=s.type;l.cat=s.cat;l.note=s.note;l.amt=s.amt;l.s=1}
     });
+    tx=tx.filter(function(x){return x._p||!x.s||sIds[String(x.id)]});
     save();render();
-    snote(add+' catatan baru ditarik dari Sheet.'+(skip?' '+skip+' baris dilewati karena tanggal, jenis, atau jumlahnya tidak terbaca.':''));
-    toast(add?'Data Sheet masuk':'Sudah sama dengan Sheet');
+    var now=new Date();
+    snote('Tersinkron '+now.toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'})+' — '+server.length+' catatan di database bersama. Data di HP ini dan HP istri sekarang sama.');
+    if(manual)toast('Sinkron selesai');
   }catch(e){
-    var c=e&&e.code;
-    snote(c==='server_not_connected'?'Konektor Google Drive belum terhubung di akun claude.ai Anda.':c==='needs_reauth'?'Sambungan Google Drive perlu dihubungkan ulang di Pengaturan Konektor claude.ai.':(c==='approval_required'||c==='not_in_manifest'||c==='consent_required')?'Izin akses Google Drive belum diberikan untuk halaman ini.':c==='server_unavailable'?'Google Drive sedang tidak merespons. Coba lagi sebentar lagi.':c==='tool_error'?'Google Drive menolak permintaan. Pastikan akun Anda punya akses ke sheet.':c==='empty'?'Sheet tidak mengembalikan isi.':'Gagal mengambil data dari Sheet.');
+    snote('Sinkron gagal (periksa koneksi internet). Catatan tetap aman tersimpan di HP ini dan akan terkirim saat sinkron berikutnya.');
+    if(manual)toast('Sinkron gagal');
   }
+  syncing=false;
 }
 function lastExp(){try{return +localStorage.getItem('kantong-yen-export')||0}catch(e){return 0}}
-async function csvOut(){
-  var dl=null;try{dl=await claude.use('downloads')}catch(e){}
-  if(!dl){snote('Unduhan tidak tersedia di tampilan ini. Buka halaman lewat claude.ai.');return}
-  var last=lastExp(),L=tx.filter(function(x){return !x.s&&x.id>last}).sort(function(a,b){return a.date<b.date?-1:a.date>b.date?1:a.id-b.id});
+function csvOut(){
+  var last=lastExp(),L=tx.filter(function(x){return x.id>last}).sort(function(a,b){return a.date<b.date?-1:a.date>b.date?1:(a.id<b.id?-1:1)});
   if(!L.length){snote('Tidak ada catatan baru sejak unduhan terakhir.');return}
-  var q=function(v){v=String(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v};
+  var q=function(v){v=String(v==null?'':v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v};
   var out=['Tanggal,Jenis,Kategori,Catatan,Jumlah (¥)'].concat(L.map(function(x){return [x.date,x.type==='in'?'Pemasukan':'Pengeluaran',q(x.cat),q(x.note),x.amt].join(',')})).join('\n');
-  try{
-    await dl.save({filename:'kantong-yen-transaksi.csv',data:out});
-    try{localStorage.setItem('kantong-yen-export',String(Math.max.apply(null,L.map(function(x){return x.id}))))}catch(e){}
-    snote(L.length+' catatan baru diunduh. Di Google Sheet pilih File, Import, Upload, lalu Append to current sheet pada tab Transaksi.');
-  }catch(e){snote(e&&e.code==='declined'?'Unduhan dibatalkan.':'Unduhan gagal.')}
+  var blob=new Blob(['\ufeff'+out],{type:'text/csv;charset=utf-8'});
+  var url=URL.createObjectURL(blob);
+  var a=document.createElement('a');a.href=url;a.download='kantong-yen-transaksi.csv';document.body.appendChild(a);a.click();a.remove();
+  setTimeout(function(){URL.revokeObjectURL(url)},4000);
+  try{localStorage.setItem('kantong-yen-export',String(Math.max.apply(null,L.map(function(x){return +x.id||0}))))}catch(e){}
+  snote(L.length+' catatan baru diunduh sebagai CSV. Di Google Sheet pilih File, Import, Upload, lalu Append to current sheet pada tab Transaksi.');
+  toast('CSV diunduh');
 }
-$('pull').onclick=pull;$('csv').onclick=csvOut;
+$('pull').onclick=function(){syncNow(true)};
+$('csv').onclick=csvOut;
 render();
+if(SYNC_URL&&syncKey())syncNow(false);
 </script>
 </body>
 </html>
